@@ -4,7 +4,11 @@ package ili9341
 
 import (
 	"device/sam"
+	"errors"
 	"machine"
+	"unsafe"
+
+	tinygoDma "github.com/sago35/tinygo-dma"
 )
 
 type spiDriver struct {
@@ -21,6 +25,39 @@ func NewSPI(bus *machine.SPI, dc, cs, rst machine.Pin) *Device {
 			bus: bus,
 		},
 	}
+}
+
+// NewSPI() を元にして、DMAの設定を追加したもの
+func NewSPIWithDMA(bus *machine.SPI, dc, cs, rst machine.Pin, dmaSrcBuf *[]byte) (*Device, error) {
+	dma := tinygoDma.NewDMA(func(d *tinygoDma.DMA) {
+		return
+	})
+	dma.SetTrigger(tinygoDma.DMAC_CHANNEL_CHCTRLA_TRIGSRC_SERCOM7_TX)
+	dma.SetTriggerAction(sam.DMAC_CHANNEL_CHCTRLA_TRIGACT_BURST)
+
+	buf := *dmaSrcBuf
+	if len(buf) == 0 {
+		return &Device{}, errors.New("dma src buf is empty")
+	}
+	desc := dma.GetDescriptor()
+	desc.UpdateDescriptor(tinygoDma.DescriptorConfig{
+		SRC:    unsafe.Pointer(&buf[0]),
+		DST:    unsafe.Pointer(&bus.Bus.DATA.Reg),
+		SRCINC: tinygoDma.DMAC_SRAM_BTCTRL_SRCINC_ENABLE,
+		DSTINC: tinygoDma.DMAC_SRAM_BTCTRL_DSTINC_DISABLE,
+		SIZE:   uint32(len(buf)),
+	})
+
+	return &Device{
+		dc:  dc,
+		cs:  cs,
+		rst: rst,
+		rd:  machine.NoPin,
+		driver: &spiDriver{
+			bus: bus,
+		},
+		dma: dma,
+	}, nil
 }
 
 func (pd *spiDriver) configure(config *Config) {

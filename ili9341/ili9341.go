@@ -6,6 +6,7 @@ import (
 	"machine"
 	"time"
 
+	tinygoDma "github.com/sago35/tinygo-dma"
 	"tinygo.org/x/drivers"
 	"tinygo.org/x/drivers/pixel"
 )
@@ -22,6 +23,7 @@ type Device struct {
 	height   int16
 	rotation drivers.Rotation
 	driver   driver
+	dma      *tinygoDma.DMA
 
 	x0, x1 int16 // cached address window; prevents useless/expensive
 	y0, y1 int16 // syscalls to PASET and CASET
@@ -60,6 +62,30 @@ var initCmd = []byte{
 	0x4E, 0xF1, 0x37, 0x07, 0x10, 0x03, 0x0E, 0x09, 0x00,
 	GMCTRN1, 15, 0x00, 0x0E, 0x14, 0x03, 0x11, 0x07, // Set Gamma
 	0x31, 0xC1, 0x48, 0x08, 0x0F, 0x0C, 0x31, 0x36, 0x0F,
+}
+
+// スクリーン全体を書き換える
+func (d Device) FlashScreen(c bool) {
+	x, y := d.Size()
+	d.setWindow(0, 0, x, y)
+	d.startWrite()
+	c565 := uint16(0x0000)
+	if c == true {
+		c565 = uint16(0xFFFF)
+	}
+	d.driver.write16n(c565, int(x)*int(y))
+	d.endWrite()
+}
+
+// dma を使い、スクリーン全体を書き換える
+func (d Device) FlashScreenWithDma() {
+	x, y := d.Size()
+	d.setWindow(0, 0, x, y)
+
+	d.startWrite()
+	d.dma.Start()
+	d.dma.Wait()
+	d.endWrite()
 }
 
 // Configure prepares display for use
